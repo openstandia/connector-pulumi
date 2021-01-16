@@ -20,10 +20,7 @@ import okhttp3.*;
 import org.identityconnectors.common.StringUtil;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.common.security.GuardedString;
-import org.identityconnectors.framework.common.exceptions.AlreadyExistsException;
-import org.identityconnectors.framework.common.exceptions.ConnectorException;
-import org.identityconnectors.framework.common.exceptions.ConnectorIOException;
-import org.identityconnectors.framework.common.exceptions.InvalidAttributeValueException;
+import org.identityconnectors.framework.common.exceptions.*;
 import org.identityconnectors.framework.common.objects.*;
 import org.identityconnectors.framework.common.objects.filter.FilterTranslator;
 import org.identityconnectors.framework.spi.Configuration;
@@ -254,11 +251,17 @@ public class PulumiConnector implements PoolableConnector, CreateOp, UpdateDelta
             // It's hard to debug the error
             if (e instanceof AlreadyExistsException) {
                 LOG.warn(e, "Detect pulumi connector error");
+
+            } else if (e instanceof UnknownUidException) {
+                LOG.warn(e, "Detect pulumi connector error");
+
             } else {
                 LOG.error(e, "Detect pulumi connector error");
             }
             return (ConnectorException) e;
         }
+        LOG.error(e, "Detect pulumi connector error");
+
         return new ConnectorIOException(e);
     }
 }

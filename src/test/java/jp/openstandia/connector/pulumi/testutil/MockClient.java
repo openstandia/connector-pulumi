@@ -57,6 +57,11 @@ public class MockClient implements PulumiClient {
     }
 
     @Override
+    public void getTeamsForUser(PulumiSchema schema, String username, PulumiQueryHandler<PulumiTeamRepresentation> handler) {
+
+    }
+
+    @Override
     public Uid createTeam(PulumiSchema schema, Set<Attribute> createAttributes) throws AlreadyExistsException {
         return null;
     }
@@ -80,15 +85,4 @@ public class MockClient implements PulumiClient {
     public PulumiTeamWithMembersRepresentation getTeam(PulumiSchema schema, Uid uid, OperationOptions options, Set<String> attributesToGet) {
         return null;
     }
-
-    @Override
-    public void getUsersForTeam(PulumiTeamWithMembersRepresentation team, PulumiQueryHandler<String> handler) {
-
-    }
-
-    @Override
-    public void assignUsersToTeam(Uid teamUid, List<String> addUserEmails, List<String> removeUserEmails) {
-
-    }
-
 }

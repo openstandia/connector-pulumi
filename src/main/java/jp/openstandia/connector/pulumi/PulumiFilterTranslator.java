@@ -18,10 +18,7 @@ package jp.openstandia.connector.pulumi;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.framework.common.objects.*;
 import org.identityconnectors.framework.common.objects.filter.AbstractFilterTranslator;
-import org.identityconnectors.framework.common.objects.filter.ContainsAllValuesFilter;
 import org.identityconnectors.framework.common.objects.filter.EqualsFilter;
-
-import static jp.openstandia.connector.pulumi.PulumiTeamHandler.ATTR_MEMBERS;
 
 public class PulumiFilterTranslator extends AbstractFilterTranslator<PulumiFilter> {
 
@@ -58,23 +55,6 @@ public class PulumiFilterTranslator extends AbstractFilterTranslator<PulumiFilte
         }
 
         // Pulumi doesn't support searching by other attributes
-        return null;
-    }
-
-    @Override
-    protected PulumiFilter createContainsAllValuesExpression(ContainsAllValuesFilter filter, boolean not) {
-        if (not) { // no way (natively) to search for "NotEquals"
-            return null;
-        }
-        Attribute attr = filter.getAttribute();
-
-        if (attr.is(ATTR_MEMBERS) && attr.getValue().size() == 1) {
-            PulumiFilter membersFilter = new PulumiFilter(attr.getName(),
-                    PulumiFilter.FilterType.EXACT_MATCH,
-                    AttributeUtil.getStringValue(attr));
-            return membersFilter;
-        }
-
         return null;
     }
 }

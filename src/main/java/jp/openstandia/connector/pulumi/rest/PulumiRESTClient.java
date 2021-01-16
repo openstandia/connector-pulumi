@@ -13,7 +13,7 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static jp.openstandia.connector.pulumi.PulumiTeamHandler.*;
-import static jp.openstandia.connector.pulumi.PulumiUserHandler.USER_OBJECT_CLASS;
+import static jp.openstandia.connector.pulumi.PulumiUserHandler.*;
 
 public class PulumiRESTClient implements PulumiClient {
 
@@ -88,12 +88,91 @@ public class PulumiRESTClient implements PulumiClient {
             throw new InvalidAttributeValueException("Can't update the pulumi user due to pending: " + userUid.getUidValue());
         }
 
-        PulumiUpdateUserOperation op = createUpdateUser(schema, modifications);
-        if (op == null) {
-            return;
+        List<String> addTeamNames = new ArrayList<>();
+        List<String> removeTeamNames = new ArrayList<>();
+
+        PulumiUpdateUserOperation op = new PulumiUpdateUserOperation();
+        boolean doUpdate = false;
+
+        for (AttributeDelta delta : modifications) {
+            if (delta.is(ATTR_ROLE)) {
+                op.role = AttributeDeltaUtil.getStringValue(delta);
+                doUpdate = true;
+
+            } else if (delta.is(ATTR_TEAMS)) {
+                List<Object> valuesToAdd = delta.getValuesToAdd();
+                if (valuesToAdd != null) {
+                    for (Object o : valuesToAdd) {
+                        addTeamNames.add(o.toString());
+                    }
+                }
+
+                List<Object> valuesToRemove = delta.getValuesToRemove();
+                if (valuesToRemove != null) {
+                    for (Object o : valuesToRemove) {
+                        removeTeamNames.add(o.toString());
+                    }
+                }
+            }
         }
 
-        callUpdate(USER_OBJECT_CLASS, getUserEndpointURL(configuration, member.user.githubLogin), userUid, op);
+        if (doUpdate) {
+            callUpdate(USER_OBJECT_CLASS, getUserEndpointURL(configuration, member.user.githubLogin), userUid, op);
+        }
+
+        // Update team association if needed
+        assignTeamsToUser(member.user.githubLogin, addTeamNames);
+        unassignTeamsToUser(member.user.githubLogin, removeTeamNames);
+    }
+
+    protected void assignTeamsToUser(String username, List<String> teamNames) {
+        for (String teamName : teamNames) {
+            Map<String, String> body = new HashMap<>();
+            body.put("memberAction", "add");
+            body.put("member", username);
+
+            try (Response response = patch(getTeamEndpointURL(configuration, teamName), body)) {
+                if (response.code() == 404) {
+                    // Missing the team
+                    throw new UnknownUidException(new Uid(teamName), TEAM_OBJECT_CLASS);
+                }
+
+                if (response.code() != 204) {
+                    throw new ConnectorIOException(String.format("Failed to assign %s %s to %s, statusCode: %d, response: %s",
+                            TEAM_OBJECT_CLASS, teamName, username, response.code(), toBody(response)));
+                }
+                // Success
+
+            } catch (IOException e) {
+                throw new ConnectorIOException(String.format("Failed to assign %s %s to %s",
+                        TEAM_OBJECT_CLASS, teamName, username));
+            }
+        }
+    }
+
+    protected void unassignTeamsToUser(String username, List<String> teamNames) {
+        for (String teamName : teamNames) {
+            Map<String, String> body = new HashMap<>();
+            body.put("memberAction", "remove");
+            body.put("member", username);
+
+            try (Response response = patch(getTeamEndpointURL(configuration, teamName), body)) {
+                if (response.code() == 404) {
+                    // Missing the team
+                    throw new UnknownUidException(new Uid(teamName), TEAM_OBJECT_CLASS);
+                }
+
+                if (response.code() != 204) {
+                    throw new ConnectorIOException(String.format("Failed to unassign %s %s to %s, statusCode: %d, response: %s",
+                            TEAM_OBJECT_CLASS, teamName, username, response.code(), toBody(response)));
+                }
+                // Success
+
+            } catch (IOException e) {
+                throw new ConnectorIOException(String.format("Failed to unassign %s %s to %s",
+                        TEAM_OBJECT_CLASS, teamName, username));
+            }
+        }
     }
 
     @Override
@@ -160,9 +239,14 @@ public class PulumiRESTClient implements PulumiClient {
     public PulumiMemberRepresentation getUser(PulumiSchema schema, Uid uid, OperationOptions options, Set<String> attributesToGet) {
         AtomicReference<PulumiMemberRepresentation> result = new AtomicReference<>();
 
+        // Unfortunately, pulumi doesn't support fetch user by email.
+        // That's why we need to fetch all users here.
         getUsers(schema, (member) -> {
+            // email is case-insensitive
             if (member.user.email.equalsIgnoreCase(uid.getUidValue())) {
                 result.set(member);
+
+                // Found the user, stop the loop
                 return false;
             }
             return true;
@@ -227,7 +311,11 @@ public class PulumiRESTClient implements PulumiClient {
 
             // Success
             PulumiTeamsRepresentation teams = MAPPER.readValue(response.body().byteStream(), PulumiTeamsRepresentation.class);
-            teams.teams.stream().forEach(team -> handler.handle(team));
+            for (PulumiTeamRepresentation team : teams.teams) {
+                if (!handler.handle(team)) {
+                    break;
+                }
+            }
 
         } catch (IOException e) {
             throw new ConnectorIOException("Failed to call pulumi get teams API", e);
@@ -258,51 +346,25 @@ public class PulumiRESTClient implements PulumiClient {
     }
 
     @Override
-    public void getUsersForTeam(PulumiTeamWithMembersRepresentation team, PulumiQueryHandler<String> handler) {
-        try {
-            if (team.members == null) {
-                // Fetch team members
-                Response response = get(getTeamEndpointURL(configuration, new Uid(team.name)));
-                if (response.code() == 404) {
-                    throw new UnknownUidException(new Uid(team.name), TEAM_OBJECT_CLASS);
-                }
-                if (response.code() != 200) {
-                    throw new ConnectorIOException(String.format("Failed to get pulumi team. statusCode: %d", response.code()));
-                }
-                team = MAPPER.readValue(response.body().byteStream(), PulumiTeamWithMembersRepresentation.class);
+    public void getTeamsForUser(PulumiSchema schema, String username, PulumiQueryHandler<PulumiTeamRepresentation> handler) {
+        // Unfortunately, pulumi doesn't support fetch team by username.
+        // That's why we need to do the following heavy process here.
+        // 1. Fetch all teams
+        // 2. Fetch each team
+        // 3. Check the user belongs to the team
+        getTeams(schema, team -> {
+            PulumiClient.PulumiTeamWithMembersRepresentation teamWithMembers = getTeam(schema, new Uid(team.name), null, Collections.emptySet());
+            Optional<PulumiTeamMemberRepresentation> found = teamWithMembers.members.stream()
+                    // The username is case-insensitive
+                    .filter(m -> m.githubLogin.equalsIgnoreCase(username))
+                    .findFirst();
+
+            if (found.isPresent()) {
+                handler.handle(team);
             }
 
-            // Unfortunately, fetch all members here because team API doesn't return email.
-            Map<String, String> usernameToEmail = new HashMap<>();
-
-            try (Response response = get(getUsersEndpointURL(configuration))) {
-                if (response.code() != 200) {
-                    throw new ConnectorIOException(String.format("Failed to get pulumi users. statusCode: %d", response.code()));
-                }
-
-                // Success
-                PulumiMembersRepresentation users = MAPPER.readValue(response.body().byteStream(), PulumiMembersRepresentation.class);
-                for (PulumiMemberRepresentation member : users.members) {
-                    usernameToEmail.put(member.user.githubLogin, member.user.email);
-                }
-            } catch (IOException e) {
-                throw new ConnectorIOException("Failed to call pulumi get users API", e);
-            }
-
-            team.members.stream().forEach(m -> {
-                String email = usernameToEmail.get(m.githubLogin);
-                handler.handle(email);
-            });
-
-        } catch (IOException e) {
-            throw new ConnectorIOException("Failed to call pulumi team members API", e);
-        }
-    }
-
-    @Override
-    public void assignUsersToTeam(Uid teamUid, List<String> addUserEmails, List<String> removeUserEmails) {
-        callAssign(TEAM_OBJECT_CLASS, getTeamEndpointURL(configuration, teamUid),
-                teamUid, addUserEmails, removeUserEmails);
+            return true;
+        }, null, Collections.emptySet(), -1);
     }
 
     // Utilities
@@ -367,95 +429,6 @@ public class PulumiRESTClient implements PulumiClient {
         } catch (IOException e) {
             throw new ConnectorIOException(String.format("Failed to delete pulumi %s: %s",
                     objectClass.getObjectClassValue(), uid.getUidValue()), e);
-        }
-    }
-
-    /**
-     * Team assign/unassign method.
-     *
-     * @param objectClass
-     * @param url
-     * @param uid
-     * @param addUserEmails
-     * @param removeUserEmails
-     */
-    protected void callAssign(ObjectClass objectClass, String url, Uid uid, List<String> addUserEmails, List<String> removeUserEmails) {
-        // Unfortunately, fetch all users here to resolve username.
-        // The key must be lowercase for case-insensitive.
-        Map<String, String> emailToUsername = new HashMap<>();
-
-        try (Response response = get(getUsersEndpointURL(configuration))) {
-            if (response.code() != 200) {
-                throw new ConnectorIOException(String.format("Failed to get pulumi users. statusCode: %d", response.code()));
-            }
-
-            // Success
-            PulumiMembersRepresentation users = MAPPER.readValue(response.body().byteStream(), PulumiMembersRepresentation.class);
-            for (PulumiMemberRepresentation member : users.members) {
-                emailToUsername.put(member.user.email.toLowerCase(), member.user.githubLogin);
-            }
-        } catch (IOException e) {
-            throw new ConnectorIOException("Failed to call pulumi get users API", e);
-        }
-
-        // assign
-        for (String email : addUserEmails) {
-            String username = emailToUsername.get(email.toLowerCase()); // Need lowerCase for case-insensitive
-            if (username == null) {
-                LOG.warn("Unknown pulumi user when assign to team. email: %s, team: %s", email, uid.getUidValue());
-                continue;
-            }
-
-            Map<String, String> body = new HashMap<>();
-            body.put("memberAction", "add");
-            body.put("member", username);
-
-            try (Response response = patch(url, body)) {
-                if (response.code() == 404) {
-                    // Missing the team
-                    throw new UnknownUidException(uid, objectClass);
-                }
-
-                if (response.code() != 204) {
-                    throw new ConnectorIOException(String.format("Failed to assign %s to %s, add: %s, remove: %s, statusCode: %d, response: %s",
-                            objectClass.getObjectClassValue(), uid.getUidValue(), addUserEmails, removeUserEmails, response.code(), toBody(response)));
-                }
-                // Success
-
-            } catch (IOException e) {
-                throw new ConnectorIOException(String.format("Failed to assign %s to %s, add: %s, remove: %s",
-                        objectClass.getObjectClassValue(), uid.getUidValue(), addUserEmails, removeUserEmails), e);
-            }
-        }
-
-        // unassign
-        for (String email : removeUserEmails) {
-            String username = emailToUsername.get(email.toLowerCase()); // Need lowerCase for case-insensitive
-            if (username == null) {
-                LOG.warn("Unknown pulumi user when unassign to team. email: %s, team: %s", email, uid.getUidValue());
-                continue;
-            }
-
-            Map<String, String> body = new HashMap<>();
-            body.put("memberAction", "remove");
-            body.put("member", username);
-
-            try (Response response = patch(url, body)) {
-                if (response.code() == 404) {
-                    // Missing the team
-                    throw new UnknownUidException(uid, objectClass);
-                }
-
-                if (response.code() != 204) {
-                    throw new ConnectorIOException(String.format("Failed to unassign %s to %s, add: %s, remove: %s, statusCode: %d, response: %s",
-                            objectClass.getObjectClassValue(), uid.getUidValue(), addUserEmails, removeUserEmails, response.code(), toBody(response)));
-                }
-                // Success
-
-            } catch (IOException e) {
-                throw new ConnectorIOException(String.format("Failed to unassign %s to %s, add: %s, remove: %s",
-                        objectClass.getObjectClassValue(), uid.getUidValue(), addUserEmails, removeUserEmails), e);
-            }
         }
     }
 
