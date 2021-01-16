@@ -16,12 +16,14 @@
 package jp.openstandia.connector.pulumi;
 
 import org.identityconnectors.common.logging.Log;
-import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.*;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static jp.openstandia.connector.pulumi.PulumiUtils.*;
 
@@ -44,6 +46,9 @@ public class PulumiUserHandler implements PulumiObjectHandler {
     public static final String ATTR_ROLE = "role"; // member, admin
     static final String ATTR_AVATAR_URL = "avatarUrl"; // member, admin
 
+    // Association
+    public static final String ATTR_TEAMS = "teams";
+
     private final PulumiConfiguration configuration;
     private final PulumiClient client;
     private final PulumiAssociationHandler associationHandler;
@@ -54,7 +59,7 @@ public class PulumiUserHandler implements PulumiObjectHandler {
         this.configuration = configuration;
         this.client = client;
         this.schema = new PulumiSchema(configuration, client);
-        this.associationHandler = new PulumiAssociationHandler(configuration, client);
+        this.associationHandler = new PulumiAssociationHandler(configuration, client, this.schema);
     }
 
     public static ObjectClassInfo createSchema() {
@@ -107,6 +112,16 @@ public class PulumiUserHandler implements PulumiObjectHandler {
                         .build()
         );
 
+        // Association
+        builder.addAttributeInfo(
+                AttributeInfoBuilder.define(ATTR_TEAMS)
+                        .setRequired(false)
+                        .setMultiValued(true)
+                        .setSubtype(AttributeInfo.Subtypes.STRING_CASE_IGNORE)
+                        .setReturnedByDefault(false)
+                        .build()
+        );
+
         ObjectClassInfo userSchemaInfo = builder.build();
 
         LOGGER.ok("The constructed user schema: {0}", userSchemaInfo);
@@ -139,15 +154,7 @@ public class PulumiUserHandler implements PulumiObjectHandler {
      */
     @Override
     public Set<AttributeDelta> updateDelta(Uid uid, Set<AttributeDelta> modifications, OperationOptions options) {
-        try {
-            if (!modifications.isEmpty()) {
-                client.updateUser(schema, uid, modifications, options);
-            }
-
-        } catch (UnknownUidException e) {
-            LOGGER.warn("Not found user when updating. uid: {0}", uid);
-            throw e;
-        }
+        client.updateUser(schema, uid, modifications, options);
 
         return null;
     }
@@ -158,13 +165,7 @@ public class PulumiUserHandler implements PulumiObjectHandler {
      */
     @Override
     public void delete(Uid uid, OperationOptions options) {
-        try {
-            client.deleteUser(schema, uid, options);
-
-        } catch (UnknownUidException e) {
-            LOGGER.warn("Not found user when deleting. uid: {0}", uid);
-            throw e;
-        }
+        client.deleteUser(schema, uid, options);
     }
 
     @Override
@@ -210,6 +211,36 @@ public class PulumiUserHandler implements PulumiObjectHandler {
         }
         if (shouldReturn(attributesToGet, ATTR_USERNAME)) {
             builder.addAttribute(AttributeBuilder.build(ATTR_USERNAME, member.user.githubLogin));
+        }
+
+        if (allowPartialAttributeValues) {
+            // Suppress fetching associations
+            LOGGER.ok("Suppress fetching associations because return partial attribute values is requested");
+
+            Stream.of(ATTR_TEAMS).forEach(attrName -> {
+                AttributeBuilder ab = new AttributeBuilder();
+                ab.setName(attrName).setAttributeValueCompleteness(AttributeValueCompleteness.INCOMPLETE);
+                ab.addValue(Collections.EMPTY_LIST);
+                builder.addAttribute(ab.build());
+            });
+
+        } else {
+            if (attributesToGet == null) {
+                // Suppress fetching associations default
+                LOGGER.ok("Suppress fetching associations because returned by default is true");
+
+            } else {
+                if (shouldReturn(attributesToGet, ATTR_TEAMS)) {
+                    // Can't resolve teams while inviting the user
+                    if (member.user.githubLogin != null) {
+                        // Fetch teams
+                        LOGGER.ok("Fetching teams because attributes to get is requested");
+
+                        List<String> teams = associationHandler.getTeamsForUser(member.user.githubLogin);
+                        builder.addAttribute(ATTR_TEAMS, teams);
+                    }
+                }
+            }
         }
 
         return builder.build();

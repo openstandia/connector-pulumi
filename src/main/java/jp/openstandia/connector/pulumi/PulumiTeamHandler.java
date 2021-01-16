@@ -18,14 +18,9 @@ package jp.openstandia.connector.pulumi;
 import org.identityconnectors.common.StringUtil;
 import org.identityconnectors.common.logging.Log;
 import org.identityconnectors.framework.common.exceptions.AlreadyExistsException;
-import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.*;
 
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
-import java.util.stream.Stream;
 
 import static jp.openstandia.connector.pulumi.PulumiUtils.*;
 
@@ -43,9 +38,6 @@ public class PulumiTeamHandler implements PulumiObjectHandler {
     public static final String ATTR_DISPLAY_NAME = "displayName";
     public static final String ATTR_DESCRIPTION = "description";
 
-    // Association
-    static final String ATTR_MEMBERS = "members";
-
     private final PulumiConfiguration configuration;
     private final PulumiClient client;
     private final PulumiSchema schema;
@@ -55,7 +47,7 @@ public class PulumiTeamHandler implements PulumiObjectHandler {
         this.configuration = configuration;
         this.client = client;
         this.schema = new PulumiSchema(configuration, client);
-        this.associationHandler = new PulumiAssociationHandler(configuration, client);
+        this.associationHandler = new PulumiAssociationHandler(configuration, client, this.schema);
     }
 
     public static ObjectClassInfo createSchema() {
@@ -93,15 +85,6 @@ public class PulumiTeamHandler implements PulumiObjectHandler {
                         .setUpdateable(true)
                         .build());
 
-        // Association
-        builder.addAttributeInfo(
-                AttributeInfoBuilder.define(ATTR_MEMBERS)
-                        .setMultiValued(true)
-                        .setReturnedByDefault(false)
-                        .setCreateable(false)
-                        .setUpdateable(false)
-                        .build());
-
         ObjectClassInfo teamSchemaInfo = builder.build();
 
         LOGGER.info("The constructed team schema: {0}", teamSchemaInfo);
@@ -118,22 +101,7 @@ public class PulumiTeamHandler implements PulumiObjectHandler {
      */
     @Override
     public Uid create(Set<Attribute> attributes) throws AlreadyExistsException {
-        Set<Attribute> teamAttrs = new HashSet<>();
-        List<Object> addMembers = null;
-
-        for (Attribute attr : attributes) {
-            if (attr.is(ATTR_MEMBERS)) {
-                addMembers = attr.getValue();
-
-            } else {
-                teamAttrs.add(attr);
-            }
-        }
-
-        Uid newUid = client.createTeam(schema, teamAttrs);
-
-        // Team
-        associationHandler.updateTeamMembers(newUid, addMembers, null);
+        Uid newUid = client.createTeam(schema, attributes);
 
         return newUid;
     }
@@ -146,31 +114,7 @@ public class PulumiTeamHandler implements PulumiObjectHandler {
      */
     @Override
     public Set<AttributeDelta> updateDelta(Uid uid, Set<AttributeDelta> modifications, OperationOptions options) {
-        Set<AttributeDelta> userDelta = new HashSet<>();
-        List<Object> addMembers = null;
-        List<Object> removeMembers = null;
-
-        for (AttributeDelta delta : modifications) {
-            if (delta.is(ATTR_MEMBERS)) {
-                addMembers = delta.getValuesToAdd();
-                removeMembers = delta.getValuesToRemove();
-
-            } else {
-                userDelta.add(delta);
-            }
-        }
-
-        try {
-            if (!userDelta.isEmpty()) {
-                client.updateTeam(schema, uid, userDelta, options);
-            }
-            // Team
-            associationHandler.updateTeamMembers(uid, addMembers, removeMembers);
-
-        } catch (UnknownUidException e) {
-            LOGGER.warn("Not found pulumi team when updating. uid: {0}", uid);
-            throw e;
-        }
+        client.updateTeam(schema, uid, modifications, options);
 
         return null;
     }
@@ -181,13 +125,7 @@ public class PulumiTeamHandler implements PulumiObjectHandler {
      */
     @Override
     public void delete(Uid uid, OperationOptions options) {
-        try {
-            client.deleteTeam(schema, uid, options);
-
-        } catch (UnknownUidException e) {
-            LOGGER.warn("Not found team when deleting. uid: {0}", uid);
-            throw e;
-        }
+        client.deleteTeam(schema, uid, options);
     }
 
     /**
@@ -203,25 +141,6 @@ public class PulumiTeamHandler implements PulumiObjectHandler {
 
         if (filter != null && (filter.isByUid() || filter.isByName())) {
             get(filter.attributeValue, resultsHandler, options, attributesToGet, allowPartialAttributeValues);
-            return;
-        } else if (filter != null && filter.isByMembers()) {
-            // Unfortunately, Heavy process...
-            // First, fetch all users to resolve the username from email.
-            // Then, fetch all teams.
-            // Then, fetch the team to fetch the members.
-            PulumiClient.PulumiMemberRepresentation member = client.getUser(schema, new Uid(filter.attributeValue), null, Collections.emptySet());
-            if (member != null) {
-                client.getTeams(schema, team -> {
-                    PulumiClient.PulumiTeamWithMembersRepresentation teamWithMembers = client.getTeam(schema, new Uid(team.name), options, attributesToGet);
-                    teamWithMembers.members.stream()
-                            .filter(m -> m.githubLogin.equalsIgnoreCase(member.user.githubLogin))
-                            .forEach(t -> {
-                                resultsHandler.handle(toConnectorObject(team, attributesToGet, allowPartialAttributeValues));
-                            });
-
-                    return true;
-                }, options, attributesToGet, -1);
-            }
             return;
         }
 
@@ -267,33 +186,6 @@ public class PulumiTeamHandler implements PulumiObjectHandler {
         if (shouldReturn(attributesToGet, ATTR_DESCRIPTION)) {
             if (!StringUtil.isEmpty(team.description)) {
                 builder.addAttribute(AttributeBuilder.build(ATTR_DESCRIPTION, team.description));
-            }
-        }
-
-        if (allowPartialAttributeValues) {
-            // Suppress fetching associations
-            LOGGER.ok("Suppress fetching associations because return partial attribute values is requested");
-
-            Stream.of(ATTR_MEMBERS).forEach(attrName -> {
-                AttributeBuilder ab = new AttributeBuilder();
-                ab.setName(attrName).setAttributeValueCompleteness(AttributeValueCompleteness.INCOMPLETE);
-                ab.addValue(Collections.EMPTY_LIST);
-                builder.addAttribute(ab.build());
-            });
-
-        } else {
-            if (attributesToGet == null) {
-                // Suppress fetching associations default
-                LOGGER.ok("Suppress fetching associations because returned by default is true");
-
-            } else {
-                if (shouldReturn(attributesToGet, ATTR_MEMBERS)) {
-                    // Fetch members
-                    LOGGER.ok("Fetching members because attributes to get is requested");
-
-                    List<String> users = associationHandler.getUsersForTeam(team);
-                    builder.addAttribute(ATTR_MEMBERS, users);
-                }
             }
         }
 

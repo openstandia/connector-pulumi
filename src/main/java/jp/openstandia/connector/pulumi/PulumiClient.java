@@ -51,8 +51,12 @@ public interface PulumiClient {
     }
 
     default String getTeamEndpointURL(PulumiConfiguration configuration, Uid teamUid) {
+        return getTeamEndpointURL(configuration, teamUid.getUidValue());
+    }
+
+    default String getTeamEndpointURL(PulumiConfiguration configuration, String teamName) {
         String url = configuration.getPulumiURL();
-        return String.format("%s/teams/%s", url, teamUid.getUidValue());
+        return String.format("%s/teams/%s", url, teamName);
     }
 
     default PulumiInvitationRepresentation createInvitation(PulumiSchema schema, Set<Attribute> attributes) {
@@ -147,6 +151,8 @@ public interface PulumiClient {
 
     PulumiMemberRepresentation getUser(PulumiSchema schema, Uid uid, OperationOptions options, Set<String> attributesToGet);
 
+    void getTeamsForUser(PulumiSchema schema, String username, PulumiQueryHandler<PulumiTeamRepresentation> handler);
+
     // Team
 
     /**
@@ -165,10 +171,6 @@ public interface PulumiClient {
     void getTeams(PulumiSchema schema, PulumiQueryHandler<PulumiTeamRepresentation> handler, OperationOptions options, Set<String> attributesToGet, int queryPageSize);
 
     PulumiTeamWithMembersRepresentation getTeam(PulumiSchema schema, Uid uid, OperationOptions options, Set<String> attributesToGet);
-
-    void getUsersForTeam(PulumiTeamWithMembersRepresentation team, PulumiQueryHandler<String> handler);
-
-    void assignUsersToTeam(Uid teamUid, List<String> addUserEmails, List<String> removeUserEmails);
 
     // JSON Representation
 

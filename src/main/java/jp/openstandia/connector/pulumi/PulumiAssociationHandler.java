@@ -16,13 +16,9 @@
 package jp.openstandia.connector.pulumi;
 
 import org.identityconnectors.common.logging.Log;
-import org.identityconnectors.framework.common.objects.Uid;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 public class PulumiAssociationHandler {
 
@@ -30,47 +26,22 @@ public class PulumiAssociationHandler {
 
     private final PulumiConfiguration configuration;
     private final PulumiClient client;
+    private final PulumiSchema schema;
 
-    public PulumiAssociationHandler(PulumiConfiguration configuration, PulumiClient client) {
+    public PulumiAssociationHandler(PulumiConfiguration configuration, PulumiClient client, PulumiSchema schema) {
         this.configuration = configuration;
         this.client = client;
+        this.schema = schema;
     }
 
-    public void updateTeamMembers(Uid uid, List<Object> addUserEmail, List<Object> removeUserEmails) {
-        if (isEmpty(addUserEmail) && isEmpty(removeUserEmails)) {
-            return;
-        }
-        client.assignUsersToTeam(uid, toList(addUserEmail), toList(removeUserEmails));
-    }
+    public List<String> getTeamsForUser(String username) {
+        List<String> teamNames = new ArrayList<>();
+        client.getTeamsForUser(schema, username, t -> {
+            teamNames.add(t.name);
 
-    public List<String> getUsersForTeam(PulumiClient.PulumiTeamWithMembersRepresentation team) {
-        List<String> users = new ArrayList<>();
-        getUsersForTeam(team, email -> {
-            users.add(email);
             return true;
         });
-        return users;
+
+        return teamNames;
     }
-
-    public void getUsersForTeam(PulumiClient.PulumiTeamWithMembersRepresentation team, PulumiQueryHandler<String> handler) {
-        client.getUsersForTeam(team, handler);
-    }
-
-    // Utilities
-
-    private <T> Stream<T> streamNullable(Collection<T> list) {
-        if (list == null) {
-            return Stream.empty();
-        }
-        return list.stream();
-    }
-
-    private List<String> toList(Collection<?> list) {
-        return streamNullable(list).map(x -> x.toString()).collect(Collectors.toList());
-    }
-
-    private boolean isEmpty(List<Object> list) {
-        return list == null || list.isEmpty();
-    }
-
 }

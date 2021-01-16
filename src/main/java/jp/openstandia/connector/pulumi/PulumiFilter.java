@@ -18,8 +18,6 @@ package jp.openstandia.connector.pulumi;
 import org.identityconnectors.framework.common.objects.Name;
 import org.identityconnectors.framework.common.objects.Uid;
 
-import static jp.openstandia.connector.pulumi.PulumiTeamHandler.ATTR_MEMBERS;
-
 public class PulumiFilter {
     final String attributeName;
     final FilterType filterType;
@@ -31,22 +29,12 @@ public class PulumiFilter {
         this.attributeValue = attributeValue;
     }
 
-    public PulumiFilter(String attributeName, FilterType filterType) {
-        this.attributeName = attributeName;
-        this.filterType = filterType;
-        this.attributeValue = null;
-    }
-
     public boolean isByName() {
         return attributeName.equals(Name.NAME) && filterType == FilterType.EXACT_MATCH;
     }
 
     public boolean isByUid() {
         return attributeName.equals(Uid.NAME) && filterType == FilterType.EXACT_MATCH;
-    }
-
-    public boolean isByMembers() {
-        return attributeName.equals(ATTR_MEMBERS) && filterType == FilterType.EXACT_MATCH;
     }
 
     public enum FilterType {
