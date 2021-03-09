@@ -338,6 +338,12 @@ public class PulumiRESTClient implements PulumiClient {
 
             // Success
             PulumiTeamWithMembersRepresentation team = MAPPER.readValue(response.body().byteStream(), PulumiTeamWithMembersRepresentation.class);
+
+            // The API returns null if no members
+            if (team.members == null) {
+                team.members = Collections.emptyList();
+            }
+
             return team;
 
         } catch (IOException e) {
