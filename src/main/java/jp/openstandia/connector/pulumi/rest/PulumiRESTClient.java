@@ -97,6 +97,9 @@ public class PulumiRESTClient implements PulumiClient {
         for (AttributeDelta delta : modifications) {
             if (delta.is(ATTR_ROLE)) {
                 op.role = AttributeDeltaUtil.getStringValue(delta);
+                if (op.role == null) {
+                    op.role = "member"; // default
+                }
                 doUpdate = true;
 
             } else if (delta.is(ATTR_TEAMS)) {
