@@ -210,6 +210,12 @@ public class PulumiUserHandler implements PulumiObjectHandler {
                 .setUid(member.user.email)
                 .setName(member.user.email);
 
+        // Attributes
+        if (shouldReturn(attributesToGet, ATTR_ROLE)) {
+            builder.addAttribute(AttributeBuilder.build(ATTR_ROLE, member.role));
+        }
+
+        // Readonly attributes
         if (shouldReturn(attributesToGet, ATTR_NAME)) {
             builder.addAttribute(AttributeBuilder.build(ATTR_NAME, member.user.name));
         }
