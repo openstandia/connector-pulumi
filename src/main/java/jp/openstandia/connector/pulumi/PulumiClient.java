@@ -60,15 +60,15 @@ public interface PulumiClient {
     }
 
     default PulumiInvitationRepresentation createInvitation(PulumiSchema schema, Set<Attribute> attributes) {
-        PulumiInvitationRepresentation team = new PulumiInvitationRepresentation();
+        PulumiInvitationRepresentation invitation = new PulumiInvitationRepresentation();
 
         for (Attribute attr : attributes) {
             // Need to get the value from __NAME__ (not __UID__)
             if (attr.getName().equals(Name.NAME)) {
-                team.email = AttributeUtil.getStringValue(attr);
+                invitation.email = AttributeUtil.getStringValue(attr);
 
             } else if (attr.getName().equals(ATTR_ROLE)) {
-                team.role = AttributeUtil.getStringValue(attr);
+                invitation.role = AttributeUtil.getStringValue(attr);
 
             } else {
                 throw new InvalidAttributeValueException(String.format("Pulumi doesn't support to set '%s' attribute of %s",
@@ -76,14 +76,14 @@ public interface PulumiClient {
             }
         }
 
-        if (team.role == null) {
-            team.role = "member";
+        if (invitation.role == null) {
+            invitation.role = "member";
         }
-        if (team.email == null) {
+        if (invitation.email == null) {
             throw new InvalidAttributeValueException("Invalid invitation due to no email");
         }
 
-        return team;
+        return invitation;
     }
 
     default PulumiUpdateUserOperation createUpdateUser(PulumiSchema schema, Set<AttributeDelta> modifications) {
