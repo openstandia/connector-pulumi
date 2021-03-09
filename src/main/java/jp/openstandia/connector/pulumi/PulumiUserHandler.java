@@ -44,7 +44,7 @@ public class PulumiUserHandler implements PulumiObjectHandler {
     // Attributes
     static final String ATTR_NAME = "name";
     public static final String ATTR_ROLE = "role"; // member, admin
-    static final String ATTR_AVATAR_URL = "avatarUrl"; // member, admin
+    static final String ATTR_AVATAR_URL = "avatarUrl";
 
     // Association
     public static final String ATTR_TEAMS = "teams";
@@ -88,6 +88,13 @@ public class PulumiUserHandler implements PulumiObjectHandler {
 
         // __PASSWORD__ attribute
         // Not supported
+
+        // Attributes
+        builder.addAttributeInfo(
+                AttributeInfoBuilder.define(ATTR_ROLE)
+                        .setRequired(false)
+                        .build()
+        );
 
         // Readonly attributes
         builder.addAttributeInfo(
@@ -203,6 +210,12 @@ public class PulumiUserHandler implements PulumiObjectHandler {
                 .setUid(member.user.email)
                 .setName(member.user.email);
 
+        // Attributes
+        if (shouldReturn(attributesToGet, ATTR_ROLE)) {
+            builder.addAttribute(AttributeBuilder.build(ATTR_ROLE, member.role));
+        }
+
+        // Readonly attributes
         if (shouldReturn(attributesToGet, ATTR_NAME)) {
             builder.addAttribute(AttributeBuilder.build(ATTR_NAME, member.user.name));
         }

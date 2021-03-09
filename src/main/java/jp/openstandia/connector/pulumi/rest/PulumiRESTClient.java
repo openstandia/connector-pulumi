@@ -97,6 +97,9 @@ public class PulumiRESTClient implements PulumiClient {
         for (AttributeDelta delta : modifications) {
             if (delta.is(ATTR_ROLE)) {
                 op.role = AttributeDeltaUtil.getStringValue(delta);
+                if (op.role == null) {
+                    op.role = "member"; // default
+                }
                 doUpdate = true;
 
             } else if (delta.is(ATTR_TEAMS)) {
@@ -338,6 +341,12 @@ public class PulumiRESTClient implements PulumiClient {
 
             // Success
             PulumiTeamWithMembersRepresentation team = MAPPER.readValue(response.body().byteStream(), PulumiTeamWithMembersRepresentation.class);
+
+            // The API returns null if no members
+            if (team.members == null) {
+                team.members = Collections.emptyList();
+            }
+
             return team;
 
         } catch (IOException e) {
