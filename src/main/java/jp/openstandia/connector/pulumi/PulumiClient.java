@@ -9,7 +9,6 @@ import org.identityconnectors.framework.common.exceptions.UnknownUidException;
 import org.identityconnectors.framework.common.objects.*;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 
 import static jp.openstandia.connector.pulumi.PulumiTeamHandler.*;
@@ -84,21 +83,6 @@ public interface PulumiClient {
         }
 
         return invitation;
-    }
-
-    default PulumiUpdateUserOperation createUpdateUser(PulumiSchema schema, Set<AttributeDelta> modifications) {
-        Optional<String> role = modifications.stream()
-                .filter(m -> m.is(ATTR_ROLE))
-                .map(m -> AttributeDeltaUtil.getStringValue(m))
-                .findFirst();
-        if (!role.isPresent()) {
-            return null;
-        }
-
-        PulumiUpdateUserOperation op = new PulumiUpdateUserOperation();
-        op.role = role.get();
-
-        return op;
     }
 
     default PulumiTeamRepresentation newTeam(PulumiSchema schema, Set<Attribute> attributes) {

@@ -142,8 +142,11 @@ public class PulumiUserHandler implements PulumiObjectHandler {
      */
     @Override
     public Uid create(Set<Attribute> attributes) {
-        // For use invitation, it only needs email.
-        Set<Attribute> userAttrs = attributes.stream().filter(a -> a.is(Name.NAME)).collect(Collectors.toSet());
+        // For user invitation, it only accepts email from UI.
+        // But we can set role attribute from API.
+        Set<Attribute> userAttrs = attributes.stream()
+                .filter(a -> a.is(Name.NAME) || a.is(ATTR_ROLE))
+                .collect(Collectors.toSet());
 
         Uid newUid = client.createUser(schema, userAttrs);
 
