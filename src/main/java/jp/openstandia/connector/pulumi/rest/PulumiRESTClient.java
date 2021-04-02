@@ -265,9 +265,10 @@ public class PulumiRESTClient implements PulumiClient {
         try (Response response = post(getCreateTeamEndpointURL(configuration), team)) {
             if (response.code() == 400) {
                 PulumiErrorRepresentation error = MAPPER.readValue(response.body().byteStream(), PulumiErrorRepresentation.class);
-                if (error.isAlreadyExists()) {
-                    throw new AlreadyExistsException(String.format("Team '%s' already exists.", team.name));
-                }
+                throw new InvalidAttributeValueException(String.format("Bad request when creating pulumi team: %s, statusCode: %d, message: %s", team.name, response.code(), error.message));
+            }
+            if (response.code() == 409) {
+                throw new AlreadyExistsException(String.format("Team '%s' already exists.", team.name));
             }
 
             if (response.code() != 201) {
